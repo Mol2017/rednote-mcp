@@ -16,7 +16,6 @@ A Python [Model Context Protocol](https://modelcontextprotocol.io/) server for R
 | `search_notes` | Search notes by keyword. Returns results with `note_id` and `xsec_token`. |
 | `get_note_details` | Fetch full note body and top-level comments using `note_id` + `xsec_token`. |
 | `get_user_profile` | Fetch a user's public profile. Pass `author_xsec_token` from `get_note_details`. |
-| `get_community_trending` | Fetch trending notes from the explore feed. |
 | `post_note` | Post a picture-and-text note. Requires 1–18 images, title ≤ 20 chars, content ≤ 1000 chars. |
 
 ## Token flow
@@ -24,7 +23,7 @@ A Python [Model Context Protocol](https://modelcontextprotocol.io/) server for R
 Tools chain together using `note_id` + `xsec_token` — XiaoHongShu's request signing system.
 
 ```
-search_notes / get_community_trending
+search_notes
   → note_id, xsec_token per result
       ↓
 get_note_details(note_id, xsec_token)
@@ -100,7 +99,6 @@ src/rednote_mcp/
 ├── tools/
 │   ├── rednote_tools.py   # search_notes, get_note_details, post_note
 │   ├── note_detail.py     # Low-level page scraping helpers
-│   ├── trending.py        # get_community_trending
 │   └── user_profile.py    # get_user_profile
 └── utils/
     └── logger.py          # Rotating file logger

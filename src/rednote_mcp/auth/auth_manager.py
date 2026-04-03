@@ -1,8 +1,14 @@
 import asyncio
 from playwright.async_api import async_playwright, Browser, BrowserContext, Page
+from playwright_stealth import Stealth
 
 from rednote_mcp.auth.cookie_manager import save_cookies, load_cookies, clear_cookies
 from rednote_mcp.utils.logger import get_logger
+
+_stealth = Stealth(
+    navigator_languages_override=("zh-CN", "zh"),
+    navigator_platform_override="Linux x86_64",
+)
 
 logger = get_logger(__name__)
 
@@ -20,9 +26,9 @@ _persistent_context: BrowserContext | None = None
 
 _CONTEXT_OPTIONS = {
     "user_agent": (
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+        "Mozilla/5.0 (X11; Linux x86_64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/131.0.0.0 Safari/537.36"
+        "Chrome/145.0.0.0 Safari/537.36"
     ),
     "viewport": {"width": 1440, "height": 900},
     "locale": "zh-CN",
@@ -61,6 +67,7 @@ async def get_persistent_context() -> tuple[Browser, BrowserContext]:
 
     _persistent_browser = await _playwright_instance.chromium.launch(headless=_headless)
     _persistent_context = await _persistent_browser.new_context(**_CONTEXT_OPTIONS)
+    await _stealth.apply_stealth_async(_persistent_context)
     await _persistent_context.add_cookies(cookies)
     logger.info("Persistent browser session started (headless=%s)", _headless)
     return _persistent_browser, _persistent_context
@@ -97,7 +104,8 @@ async def login(timeout_seconds: int = 60, force: bool = False) -> bool:
         try:
             async with async_playwright() as p:
                 browser: Browser = await p.chromium.launch(headless=False)
-                context: BrowserContext = await browser.new_context()
+                context: BrowserContext = await browser.new_context(**_CONTEXT_OPTIONS)
+                await _stealth.apply_stealth_async(context)
 
                 existing = load_cookies()
                 if existing:
@@ -160,5 +168,6 @@ async def get_authenticated_context(playwright_instance, headless: bool | None =
     effective_headless = _headless if headless is None else headless
     browser: Browser = await playwright_instance.chromium.launch(headless=effective_headless)
     context: BrowserContext = await browser.new_context()
+    await _stealth.apply_stealth_async(context)
     await context.add_cookies(cookies)
     return browser, context

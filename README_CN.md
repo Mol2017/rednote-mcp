@@ -16,7 +16,6 @@
 | `search_notes` | 按关键词搜索笔记，结果包含 `note_id` 和 `xsec_token`。 |
 | `get_note_details` | 通过 `note_id` + `xsec_token` 获取笔记正文和顶级评论。 |
 | `get_user_profile` | 获取用户公开主页。可传入 `get_note_details` 返回的 `author_xsec_token`。 |
-| `get_community_trending` | 获取发现页热门笔记。 |
 | `post_note` | 发布图文笔记。需 1–18 张图片，标题 ≤ 20 字，正文 ≤ 1000 字。 |
 
 ## Token 传递流程
@@ -24,7 +23,7 @@
 各工具通过 `note_id` + `xsec_token`（小红书请求签名机制）串联使用：
 
 ```
-search_notes / get_community_trending
+search_notes
   → 每条结果包含 note_id、xsec_token
       ↓
 get_note_details(note_id, xsec_token)
@@ -100,7 +99,6 @@ src/rednote_mcp/
 ├── tools/
 │   ├── rednote_tools.py   # search_notes、get_note_details、post_note
 │   ├── note_detail.py     # 底层页面抓取工具函数
-│   ├── trending.py        # get_community_trending
 │   └── user_profile.py    # get_user_profile
 └── utils/
     └── logger.py          # 滚动日志

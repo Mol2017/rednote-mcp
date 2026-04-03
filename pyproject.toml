@@ -13,6 +13,7 @@ keywords = ["rednote", "xiaohongshu", "xhs", "mcp", "model-context-protocol"]
 dependencies = [
     "mcp[cli]>=1.0.0",
     "playwright>=1.42.0",
+    "playwright-stealth>=2.0.0",
 ]
 
 [project.scripts]

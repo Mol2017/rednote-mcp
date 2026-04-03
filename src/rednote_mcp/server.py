@@ -2,13 +2,12 @@
 RedNote MCP Server – Python implementation.
 
 Tools:
-  1.  login                  – QR-code authentication
-  2.  set_browser_mode       – Toggle headless/headed browser (use headed when bot detected)
-  3.  search_notes           – Search notes by keyword
-  3.  get_note_details       – Full note body + top-level comments (fast, token-light)
-  4.  get_user_profile       – User stats + recent posts
-  6.  get_community_trending – Trending notes from the explore feed
-  7.  post_note                 – Publish a new note (picture + text) on the creator platform
+  1.  login              – QR-code authentication
+  2.  set_browser_mode   – Toggle headless/headed browser (use headed when bot detected)
+  3.  search_notes       – Search notes by keyword
+  4.  get_note_details   – Full note body + top-level comments (fast, token-light)
+  5.  get_user_profile   – User stats + recent posts
+  6.  post_note          – Publish a new note (picture + text) on the creator platform
 """
 
 from __future__ import annotations
@@ -29,7 +28,6 @@ from rednote_mcp.tools.rednote_tools import (
     post_note as _post_note,
     search_notes as _search_notes,
 )
-from rednote_mcp.tools.trending import get_community_trending as _get_community_trending
 from rednote_mcp.tools.user_profile import get_user_profile as _get_user_profile
 from rednote_mcp.utils.logger import get_logger
 
@@ -232,39 +230,7 @@ async def get_user_profile(user_id: str, xsec_token: str = "", recent_posts_limi
 
 
 # ---------------------------------------------------------------------------
-# Tool 6 – get_community_trending
-# ---------------------------------------------------------------------------
-
-@mcp.tool()
-async def get_community_trending(limit: int = 18) -> str:
-    """
-    Fetch trending notes from the XiaoHongShu explore feed.
-
-    Input:
-        limit (int, default 18): Max trending notes to return.
-
-    Output (JSON array of objects):
-        [
-          {
-            "title":      str,
-            "author":     str,
-            "url":        str,
-            "cover_img":  str,  // thumbnail URL
-            "likes":      int,
-            "note_id":    str,  // use with get_note_details
-            "xsec_token": str   // use with get_note_details
-          },
-          ...
-        ]
-    """
-    logger.info("Tool: get_community_trending limit=%d", limit)
-    browser, context = await get_persistent_context()
-    result = await _get_community_trending(context, limit=limit)
-    return _json(result)
-
-
-# ---------------------------------------------------------------------------
-# Tool 7 – post_note
+# Tool 6 – post_note
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
