@@ -133,14 +133,16 @@ async def search_notes(keyword: str, limit: int = 3) -> str:
     Output (JSON array of objects):
         [
           {
-            "title":    str,   // note title
-            "author":   str,   // display name of the author
-            "content":  str,   // body text (may be truncated)
-            "tags":     [str], // hashtags found in the content
-            "url":      str,   // full xiaohongshu.com note URL
-            "likes":    int,
-            "collects": int,
-            "comments": int
+            "title":       str,   // note title
+            "author":      str,   // display name of the author
+            "content":     str,   // body text (may be truncated)
+            "tags":        [str], // hashtags found in the content
+            "url":         str,   // full xiaohongshu.com note URL
+            "likes":       int,
+            "collects":    int,
+            "comments":    int,
+            "note_id":     str,   // use with get_note_details
+            "xsec_token":  str    // use with get_note_details
           },
           ...
         ]
@@ -156,13 +158,14 @@ async def search_notes(keyword: str, limit: int = 3) -> str:
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
-async def get_note_details(url: str, top_comments_limit: int = 10) -> str:
+async def get_note_details(note_id: str, xsec_token: str, top_comments_limit: int = 10) -> str:
     """
     Fetch the full body of a note and its top-level comments. Does not expand
     nested reply threads. Use this as the default way to read a note.
 
     Input:
-        url                (str): Note URL (xiaohongshu.com/explore/...).
+        note_id            (str): Note ID from search_notes or get_community_trending results.
+        xsec_token         (str): Access token from search_notes or get_community_trending results.
         top_comments_limit (int, default 10): Max top-level comments to include.
 
     Output (JSON object):
@@ -174,7 +177,8 @@ async def get_note_details(url: str, top_comments_limit: int = 10) -> str:
           "videos":   [str],   // video stream URLs (empty for image notes)
           "url":      str,
           "author":   str,
-          "author_id": str,    // user ID, use with get_user_profile
+          "author_id":         str,  // user ID, use with get_user_profile
+          "author_xsec_token": str,  // token for get_user_profile
           "likes":    int,
           "collects": int,
           "comments_count": int,
@@ -184,9 +188,9 @@ async def get_note_details(url: str, top_comments_limit: int = 10) -> str:
           ]
         }
     """
-    logger.info("Tool: get_note_details url='%s'", url)
+    logger.info("Tool: get_note_details note_id='%s'", note_id)
     browser, context = await get_persistent_context()
-    result = await _get_note_details(context, url, top_comments_limit)
+    result = await _get_note_details(context, note_id, xsec_token, top_comments_limit)
     return _json(result)
 
 
@@ -195,13 +199,15 @@ async def get_note_details(url: str, top_comments_limit: int = 10) -> str:
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
-async def get_user_profile(user_id: str, recent_posts_limit: int = 3) -> str:
+async def get_user_profile(user_id: str, xsec_token: str = "", recent_posts_limit: int = 3) -> str:
     """
-    Fetch the public profile of a XiaoHongShu user. The author_id field returned
-    by get_note_details can be passed directly as user_id here.
+    Fetch the public profile of a XiaoHongShu user. Pass author_id and
+    author_xsec_token from get_note_details directly as user_id and xsec_token here.
 
     Input:
-        user_id            (str): Bare user ID (e.g. "5e3e3b3b3e3b3b3b3b3b3b3b").
+        user_id            (str): Bare user ID from get_note_details author_id field.
+        xsec_token         (str, optional): Token from get_note_details author_xsec_token field.
+                           Providing it builds a properly authenticated URL (recommended).
         recent_posts_limit (int, default 3): Max recent posts to include.
 
     Output (JSON object):
@@ -221,7 +227,7 @@ async def get_user_profile(user_id: str, recent_posts_limit: int = 3) -> str:
     """
     logger.info("Tool: get_user_profile id='%s'", user_id)
     browser, context = await get_persistent_context()
-    result = await _get_user_profile(context, user_id, recent_posts_limit)
+    result = await _get_user_profile(context, user_id, xsec_token, recent_posts_limit)
     return _json(result)
 
 
@@ -240,11 +246,13 @@ async def get_community_trending(limit: int = 18) -> str:
     Output (JSON array of objects):
         [
           {
-            "title":     str,
-            "author":    str,
-            "url":       str,
-            "cover_img": str,   // thumbnail URL
-            "likes":     int
+            "title":      str,
+            "author":     str,
+            "url":        str,
+            "cover_img":  str,  // thumbnail URL
+            "likes":      int,
+            "note_id":    str,  // use with get_note_details
+            "xsec_token": str   // use with get_note_details
           },
           ...
         ]

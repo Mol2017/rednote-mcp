@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import random
+import re
 from dataclasses import dataclass
+from urllib.parse import urlparse, parse_qs
 
 from playwright.async_api import BrowserContext, Page
 
@@ -13,6 +15,22 @@ logger = get_logger(__name__)
 
 XHS_EXPLORE = "https://www.xiaohongshu.com/explore"
 
+_NOTE_ID_RE = re.compile(r"/(?:explore|search_result)/([^/?#]+)")
+_XSEC_TOKEN_RE = re.compile(r"[?&]xsec_token=([^&\s]+)")
+
+
+def _parse_note_id_and_token(url: str) -> tuple[str, str]:
+    """Extract (note_id, xsec_token) from a XiaoHongShu URL or href."""
+    note_id = ""
+    xsec_token = ""
+    m = _NOTE_ID_RE.search(url)
+    if m:
+        note_id = m.group(1)
+    m = _XSEC_TOKEN_RE.search(url)
+    if m:
+        xsec_token = m.group(1)
+    return note_id, xsec_token
+
 
 @dataclass
 class TrendingItem:
@@ -21,6 +39,8 @@ class TrendingItem:
     url: str = ""
     cover_img: str = ""
     likes: int = 0
+    note_id: str = ""
+    xsec_token: str = ""
 
     def to_dict(self) -> dict:
         return {
@@ -29,6 +49,8 @@ class TrendingItem:
             "url": self.url,
             "cover_img": self.cover_img,
             "likes": self.likes,
+            "note_id": self.note_id,
+            "xsec_token": self.xsec_token,
         }
 
 
@@ -72,6 +94,9 @@ async def get_community_trending(
                         continue
                     seen_urls.add(t.url)
                     new_this_round += 1
+
+                    # Extract note_id and xsec_token from href
+                    t.note_id, t.xsec_token = _parse_note_id_and_token(t.url)
 
                     # Cover image
                     cover_img = await note_item.query_selector("a.cover img, img[src*='sns-webpic'], .cover img")

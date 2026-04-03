@@ -27,6 +27,25 @@ FULL_URL_RE = re.compile(
     r"(https?://(?:www\.)?xiaohongshu\.com/[^\s，,。！？]+)", re.IGNORECASE
 )
 _AUTHOR_ID_RE = re.compile(r"user/profile/([^/?#]+)")
+_NOTE_ID_RE = re.compile(r"/(?:explore|search_result)/([^/?#]+)")
+_XSEC_TOKEN_RE = re.compile(r"[?&]xsec_token=([^&\s]+)")
+
+
+def _parse_note_id_and_token(url: str) -> tuple[str, str]:
+    """Extract (note_id, xsec_token) from a XiaoHongShu URL or href."""
+    note_id = ""
+    xsec_token = ""
+    m = _NOTE_ID_RE.search(url)
+    if m:
+        note_id = m.group(1)
+    m = _XSEC_TOKEN_RE.search(url)
+    if m:
+        xsec_token = m.group(1)
+    return note_id, xsec_token
+
+
+def _make_note_url(note_id: str, xsec_token: str) -> str:
+    return f"https://www.xiaohongshu.com/explore/{note_id}?xsec_token={xsec_token}&xsec_source=pc_feed"
 
 
 def _extract_url(text: str) -> str | None:
@@ -51,6 +70,28 @@ async def _random_delay(lo: float = 1.0, hi: float = 3.0) -> None:
     await asyncio.sleep(random.uniform(lo, hi))
 
 
+async def _human_click(page: Page, element) -> None:
+    """Move mouse to element with slight jitter before clicking."""
+    box = await element.bounding_box()
+    if box:
+        x = box["x"] + box["width"] / 2 + random.uniform(-5, 5)
+        y = box["y"] + box["height"] / 2 + random.uniform(-3, 3)
+        await page.mouse.move(x, y)
+        await asyncio.sleep(random.uniform(0.05, 0.15))
+    await element.click()
+
+
+async def _human_type(page: Page, text: str, delay_lo: float = 30, delay_hi: float = 90) -> None:
+    """Type text with per-keystroke random delays and occasional thinking pauses."""
+    next_pause_at = random.randint(15, 40)
+    for i, char in enumerate(text):
+        await page.keyboard.type(char)
+        await asyncio.sleep(random.uniform(delay_lo, delay_hi) / 1000)
+        if i + 1 >= next_pause_at:
+            await asyncio.sleep(random.uniform(0.3, 0.8))
+            next_pause_at += random.randint(15, 40)
+
+
 async def _scroll_down(page: Page, steps: int = 3) -> None:
     """Scroll down incrementally to mimic human reading."""
     for _ in range(steps):
@@ -72,6 +113,8 @@ class NoteSummary:
     likes: int = 0
     collects: int = 0
     comments: int = 0
+    note_id: str = ""
+    xsec_token: str = ""
 
     def to_dict(self) -> dict:
         return {
@@ -83,6 +126,8 @@ class NoteSummary:
             "likes": self.likes,
             "collects": self.collects,
             "comments": self.comments,
+            "note_id": self.note_id,
+            "xsec_token": self.xsec_token,
         }
 
 
@@ -101,14 +146,15 @@ async def search_notes(
         # Phase 1: scroll and collect unique URLs — gather extra as buffer for ads
         buffer = limit * 2
         seen_urls: set[str] = set()
-        collected_urls: list[str] = []
+        # Store (full_url, note_id, xsec_token) tuples
+        collected: list[tuple[str, str, str]] = []
         no_new_rounds = 0
 
-        while len(collected_urls) < buffer and no_new_rounds < 3:
+        while len(collected) < buffer and no_new_rounds < 3:
             items = await page.query_selector_all(".feeds-container .note-item")
             new_this_round = 0
             for item in items:
-                if len(collected_urls) >= buffer:
+                if len(collected) >= buffer:
                     break
                 try:
                     cover = await item.query_selector("a.cover.mask.ld") or await item.query_selector("a")
@@ -118,19 +164,20 @@ async def search_notes(
                             full_url = href if href.startswith("http") else f"https://www.xiaohongshu.com{href}"
                             if full_url not in seen_urls:
                                 seen_urls.add(full_url)
-                                collected_urls.append(full_url)
+                                note_id, xsec_token = _parse_note_id_and_token(href)
+                                collected.append((full_url, note_id, xsec_token))
                                 new_this_round += 1
                 except Exception:
                     pass
 
-            logger.info("URL collection round: %d new, %d total for '%s'", new_this_round, len(collected_urls), keyword)
+            logger.info("URL collection round: %d new, %d total for '%s'", new_this_round, len(collected), keyword)
 
             if new_this_round == 0:
                 no_new_rounds += 1
             else:
                 no_new_rounds = 0
 
-            if len(collected_urls) < buffer:
+            if len(collected) < buffer:
                 await _scroll_down(page, steps=4)
                 await _random_delay(1.0, 2.0)
 
@@ -138,13 +185,15 @@ async def search_notes(
         page = None  # prevent double-close in finally
 
         # Phase 2: visit each URL directly; skip ads (empty title) and stop when limit reached
-        for note_url in collected_urls:
+        for note_url, note_id, xsec_token in collected:
             if len(results) >= limit:
                 break
             note_page: Page = await context.new_page()
-            note = NoteSummary(url=note_url)
+            # Use authenticated URL when we have note_id + xsec_token
+            visit_url = _make_note_url(note_id, xsec_token) if note_id and xsec_token else note_url
+            note = NoteSummary(url=note_url, note_id=note_id, xsec_token=xsec_token)
             try:
-                await note_page.goto(note_url, wait_until="domcontentloaded")
+                await note_page.goto(visit_url, wait_until="domcontentloaded")
                 await _random_delay()
 
                 try:
@@ -189,18 +238,20 @@ async def search_notes(
 
 async def get_note_details(
     context: BrowserContext,
-    url_or_text: str,
+    note_id: str,
+    xsec_token: str,
     top_comments_limit: int = 10,
 ) -> NoteWithComments:
-    url = _extract_url(url_or_text) or url_or_text
+    url = _make_note_url(note_id, xsec_token)
     page: Page = await context.new_page()
     try:
         await page.goto(url, wait_until="domcontentloaded")
 
         base = await extract_note_detail(page, page.url)
 
-        # Try to extract author_id from the author profile link
+        # Extract author_id and author_xsec_token from the author profile link
         author_id = ""
+        author_xsec_token = ""
         try:
             for sel in (".author-container a", ".author-wrapper a"):
                 el = await page.query_selector(sel)
@@ -209,6 +260,9 @@ async def get_note_details(
                     m = _AUTHOR_ID_RE.search(href or "")
                     if m:
                         author_id = m.group(1)
+                        tk_m = _XSEC_TOKEN_RE.search(href or "")
+                        if tk_m:
+                            author_xsec_token = tk_m.group(1)
                         break
         except Exception:
             pass
@@ -224,6 +278,7 @@ async def get_note_details(
             url=base.url,
             author=base.author,
             author_id=author_id,
+            author_xsec_token=author_xsec_token,
             likes=base.likes,
             collects=base.collects,
             comments_count=base.comments,
@@ -271,7 +326,7 @@ async def post_note(
         publish_link = await page.query_selector("a[href*='publish'].link-wrapper")
         if not publish_link:
             return {"success": False, "error": "Could not find 发布 button on main site"}
-        await publish_link.click()
+        await _human_click(page, publish_link)
 
         try:
             creator_page = await asyncio.wait_for(new_page_future, timeout=10)
@@ -330,8 +385,8 @@ async def post_note(
                 'input[placeholder*="填写标题"], input[placeholder*="title"]',
                 timeout=8_000,
             )
-            await title_input.click()
-            await title_input.fill(title)
+            await _human_click(creator_page, title_input)
+            await _human_type(creator_page, title)
         except Exception as e:
             return {"success": False, "error": f"Could not fill title field — title provided: {repr(title)}. Error: {e}"}
 
@@ -343,7 +398,7 @@ async def post_note(
                 'div.ProseMirror, div.tiptap',
                 timeout=8_000,
             )
-            await content_area.click()
+            await _human_click(creator_page, content_area)
             full_content = content
             if tags:
                 full_content += "\n" + " ".join(
@@ -351,7 +406,7 @@ async def post_note(
                 )
             if not full_content.strip():
                 return {"success": False, "error": "Content is empty — provide non-empty content text"}
-            await content_area.fill(full_content)
+            await _human_type(creator_page, full_content, delay_lo=20, delay_hi=60)
         except Exception as e:
             return {"success": False, "error": f"Could not fill content field — content provided: {repr(content[:80])}. Error: {e}"}
 
@@ -367,7 +422,7 @@ async def post_note(
                     'button.publishBtn, button[class*="publish"]:not([class*="note"])',
                     timeout=5_000,
                 )
-                await submit_btn.click()
+                await _human_click(creator_page, submit_btn)
                 btn_clicked = True
             except Exception:
                 pass

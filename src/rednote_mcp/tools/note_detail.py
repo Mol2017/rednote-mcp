@@ -97,6 +97,7 @@ class NoteWithComments:
     url: str = ""
     author: str = ""
     author_id: str = ""
+    author_xsec_token: str = ""
     likes: int = 0
     collects: int = 0
     comments_count: int = 0
@@ -112,6 +113,7 @@ class NoteWithComments:
             "url": self.url,
             "author": self.author,
             "author_id": self.author_id,
+            "author_xsec_token": self.author_xsec_token,
             "likes": self.likes,
             "collects": self.collects,
             "comments_count": self.comments_count,

@@ -14,8 +14,11 @@ XHS_USER_URL = "https://www.xiaohongshu.com/user/profile/{user_id}"
 _USER_ID_RE = re.compile(r"user/profile/([^/?#]+)")
 
 
-def _build_profile_url(user_id: str) -> str:
-    return XHS_USER_URL.format(user_id=user_id.strip())
+def _build_profile_url(user_id: str, xsec_token: str = "") -> str:
+    base = XHS_USER_URL.format(user_id=user_id.strip())
+    if xsec_token:
+        return f"{base}?xsec_token={xsec_token}&xsec_source=pc_note"
+    return base
 
 
 @dataclass
@@ -61,9 +64,10 @@ class UserProfile:
 async def get_user_profile(
     context: BrowserContext,
     user_id: str,
+    xsec_token: str = "",
     recent_posts_limit: int = 3,
 ) -> UserProfile:
-    url = _build_profile_url(user_id)
+    url = _build_profile_url(user_id, xsec_token)
     profile = UserProfile(profile_url=url)
 
     page: Page = await context.new_page()
