@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import asyncio
 import re
 import random
@@ -243,7 +244,18 @@ async def post_note(
     image_paths: list[str],
     tags: list[str] | None = None,
 ) -> dict:
-    import os
+    errors = []
+    if len(title) > 20:
+        errors.append(f"Title exceeds 20 characters (got {len(title)})")
+    if len(content) > 1000:
+        errors.append(f"Content exceeds 1000 characters (got {len(content)})")
+    if len(image_paths) == 0:
+        errors.append("At least one image is required")
+    elif len(image_paths) > 18:
+        errors.append(f"Too many images: maximum is 18 (got {len(image_paths)})")
+    if errors:
+        return {"success": False, "errors": errors}
+
     image_paths = [os.path.expanduser(p) for p in image_paths]
 
     # Step 1: open main site and click 发布 to open creator platform in a new tab
@@ -346,36 +358,47 @@ async def post_note(
         await _random_delay(1, 2)
 
         # Step 6: click publish (standalone "发布" button, not "发布笔记")
-        published = False
-        try:
-            submit_btn = await creator_page.wait_for_selector(
-                'button.publishBtn, button[class*="publish"]:not([class*="note"])',
-                timeout=5_000,
-            )
-            await submit_btn.click()
-            await _random_delay(2, 3)
-            published = True
-        except Exception:
-            pass
-        if not published:
-            # Fallback: use JS to find the standalone 发布 button
+        # Try up to 3 times; after each click, verify the button is gone
+        for _ in range(3):
+            # Try CSS selector first, then JS fallback
+            btn_clicked = False
             try:
-                clicked = await creator_page.evaluate('''() => {
-                    const btns = Array.from(document.querySelectorAll("button"));
-                    const btn = btns.find(b => b.innerText.trim() === "发布" || b.innerText.trim() === "Publish");
-                    if (btn) { btn.click(); return true; }
-                    return false;
-                }''')
-                if clicked:
-                    await _random_delay(2, 3)
-                    published = True
-            except Exception as e:
-                return {"success": False, "error": f"Publish button click failed: {e}"}
+                submit_btn = await creator_page.wait_for_selector(
+                    'button.publishBtn, button[class*="publish"]:not([class*="note"])',
+                    timeout=5_000,
+                )
+                await submit_btn.click()
+                btn_clicked = True
+            except Exception:
+                pass
+            if not btn_clicked:
+                try:
+                    btn_clicked = await creator_page.evaluate('''() => {
+                        const btns = Array.from(document.querySelectorAll("button"));
+                        const btn = btns.find(b => b.innerText.trim() === "发布" || b.innerText.trim() === "Publish");
+                        if (btn) { btn.click(); return true; }
+                        return false;
+                    }''')
+                except Exception as e:
+                    return {"success": False, "error": f"Publish button click failed: {e}"}
 
-        if not published:
-            return {"success": False, "error": "Could not find publish button"}
+            if not btn_clicked:
+                return {"success": False, "error": "Could not find publish button"}
 
-        return {"success": True}
+            await _random_delay(2, 3)
+
+            # Check if the publish button is still visible — if gone, we succeeded
+            still_visible = await creator_page.evaluate('''() => {
+                const btns = Array.from(document.querySelectorAll("button"));
+                const btn = btns.find(b => b.innerText.trim() === "发布" || b.innerText.trim() === "Publish");
+                if (!btn) return false;
+                const rect = btn.getBoundingClientRect();
+                return rect.width > 0 && rect.height > 0;
+            }''')
+            if not still_visible:
+                return {"success": True}
+
+        return {"success": False, "error": "Publish button still visible after 3 attempts — post may not have been submitted"}
 
     except Exception as e:
         logger.error("post_note error: %s", e)

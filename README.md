@@ -1,141 +1,72 @@
 # rednote-mcp (Python)
 
-A Python [Model Context Protocol](https://modelcontextprotocol.io/) server for RedNote (小红书 / XiaoHongShu).  
-It uses [Playwright](https://playwright.dev/python/) for browser automation and exposes tools to AI assistants such as Claude, Cursor, or any MCP-compatible client.
+A Python [Model Context Protocol](https://modelcontextprotocol.io/) server for RedNote (小红书 / XiaoHongShu) — search, browse, and **post notes** via browser automation with [Playwright](https://playwright.dev/python/). Works with Claude, Cursor, or any MCP-compatible client.
 
 ## Tools
 
 | Tool | Description |
 |------|-------------|
-| `login` | Open a visible browser and authenticate via QR code scan. Cookies are persisted and reused automatically. Use `force=True` to clear the existing session and start fresh. |
-| `set_browser_mode` | Toggle headless (invisible) or headed (visible) browser. Switch to headed when bot detection is triggered — a key symptom is tools returning empty results. |
-| `search_notes` | Search notes by keyword. Returns title, author, content, tags, URL, likes, collects, and comments. |
-| `get_note_details` | Fetch the full body of a note plus its top-level comments from a URL or share text. |
-| `get_user_profile` | Fetch a user's public profile — followers, following, total likes, and recent posts. |
-| `get_community_trending` | Fetch trending notes from the XiaoHongShu explore feed. |
-| `post_note` | Publish a picture-and-text note via the creator platform. Requires at least one local image file and text content. |
+| `login` | Authenticate via QR code scan. Use `force=True` to reset the session. |
+| `set_browser_mode` | Toggle headless/headed browser. Use headed if tools return empty results. |
+| `search_notes` | Search notes by keyword. Returns title, author, tags, URL, likes, and comments. |
+| `get_note_details` | Fetch full note body and top-level comments from a URL or share text. |
+| `get_user_profile` | Fetch a user's public profile — followers, following, likes, and recent posts. |
+| `get_community_trending` | Fetch trending notes from the explore feed. |
+| `post_note` | **Post a picture-and-text note** to the creator platform. Requires 1–18 images, title ≤ 20 chars, content ≤ 1000 chars. |
 
 ## Requirements
 
 - Python ≥ 3.10
+- `mcp[cli]` ≥ 1.0.0
+- `playwright` ≥ 1.42.0
 - [uv](https://docs.astral.sh/uv/) (recommended) or pip
 
 ## Installation
 
+### 1. Install the package
 ```bash
 # 1. Clone and enter the directory
-git clone <repo-url> rednote-mcp-python
+git clone https://github.com/Mol2017/rednote-mcp.git
 cd rednote-mcp-python
 
 # 2. Create a virtual environment and install dependencies
 uv venv && source .venv/bin/activate
-uv pip install -e ".[dev]"          # or: pip install -e .
+uv pip install -e .
 
 # 3. Install Playwright browsers
 playwright install chromium
 ```
 
+### 2. Add to Claude and verify
+
+```bash
+# Register the MCP server with Claude
+claude mcp add rednote .venv/bin/rednote-mcp
+
+# Verify it is connected
+claude mcp list
+```
+
+### 3. Debug
+
+```bash
+# Activate the virtual environment
+source .venv/bin/activate
+
+# Launch the MCP dev inspector
+mcp dev src/rednote_mcp/server.py
+```
+
 ## First-time login
 
-Before using any other tool you must authenticate once so that cookies are saved:
+Ask the agent to log in to RedNote. It opens a real Chrome window with a QR code — scan it with the RedNote app. Cookies are persisted to `~/.mcp/rednote/cookies.json` and reused automatically for all future calls.
 
-```bash
-rednote-mcp          # starts the MCP server
-# then call the login tool from your AI client
-```
 
-The `login` tool opens a real Chrome window. Scan the QR code with the XiaoHongShu app. Cookies are persisted to `~/.mcp/rednote/cookies.json` and reused for all future calls.
+## Anti-bot detection
 
-## MCP client configuration
+Mitigations included: persistent browser session, realistic Chrome 131/macOS fingerprint (viewport 1440×900, locale `zh-CN`, timezone `Asia/Shanghai`), random delays between actions, and incremental scrolling.
 
-### Claude Code (CLI)
-
-Claude Code uses `claude mcp add` to register servers. Run this once from any directory:
-
-```bash
-claude mcp add rednote /path/to/rednote-mcp-python/.venv/bin/rednote-mcp
-```
-
-Replace `/path/to/rednote-mcp-python` with the actual clone path. Verify it is connected:
-
-```bash
-claude mcp list
-# rednote: /path/to/rednote-mcp-python/.venv/bin/rednote-mcp - ✓ Connected
-```
-
-The server is now available in every Claude Code session. To approve tools without being prompted each time, add them to `.claude/settings.local.json` in your project:
-
-```json
-{
-  "permissions": {
-    "allow": [
-      "mcp__rednote__search_notes",
-      "mcp__rednote__get_note_details",
-      "mcp__rednote__get_user_profile",
-      "mcp__rednote__get_community_trending",
-      "mcp__rednote__post_note",
-      "mcp__rednote__login",
-      "mcp__rednote__set_browser_mode"
-    ]
-  }
-}
-```
-
-Example usage inside a Claude Code session:
-
-```
-search for "AI工具" on rednote
-get note details from <url>
-post a note with image /tmp/photo.jpg and text "Hello RedNote"
-```
-
-### Claude Desktop / Cursor
-
-Add to your `mcp_settings.json` (or equivalent):
-
-```json
-{
-  "mcpServers": {
-    "rednote": {
-      "command": "rednote-mcp",
-      "args": []
-    }
-  }
-}
-```
-
-Or if using `uv run`:
-
-```json
-{
-  "mcpServers": {
-    "rednote": {
-      "command": "uv",
-      "args": ["--directory", "/path/to/rednote-mcp-python", "run", "rednote-mcp"]
-    }
-  }
-}
-```
-
-## Bot detection
-
-XiaoHongShu actively detects automated browsers. This server includes several mitigations:
-
-| Mitigation | Detail |
-|------------|--------|
-| **Persistent browser session** | The browser stays open between tool calls instead of launching fresh every time — opening a new browser per request is a strong bot signal. |
-| **Realistic browser fingerprint** | User agent is set to a real Chrome 131 on macOS string. Viewport (1440×900), locale (`zh-CN`), and timezone (`Asia/Shanghai`) match a typical Chinese user. |
-| **Human-like delays** | Random pauses of 1–3 seconds between actions; longer pauses (2–4 seconds) during feed scrolling. |
-| **Incremental scrolling** | Feed pages are scrolled in small random steps (400–700 px) with pauses between each, rather than jumping straight to the bottom. |
-| **Headed mode fallback** | If tools return empty results (the main symptom of bot detection), call `set_browser_mode(headless=False)` — the visible browser lets you see and dismiss any CAPTCHA challenge before retrying. |
-
-### Recovery flow when bot detection triggers
-
-1. Call `set_browser_mode(headless=False)` — switches to visible browser and resets the session.
-2. Call `login(force=True)` — clears the old session and opens a fresh QR code.
-3. Scan the QR code.
-4. Retry the original tool — results should return normally.
-5. Optionally call `set_browser_mode(headless=True)` to go back to background mode.
+If tools return empty results (bot detection triggered): call `set_browser_mode(headless=False)`, then `login(force=True)`, scan the QR code, and retry.
 
 ## Project structure
 

@@ -272,16 +272,20 @@ async def post_note(
 
     Input:
         title       (str): Note title (required).
+                    - Must not exceed 20 characters.
         content     (str): Note body text (required).
+                    - Must not exceed 1000 characters.
         image_paths (list[str]): Local file paths of images to upload (required).
-                    Must be files on the local machine — URLs are not supported.
-                    Supports jpg, jpeg, png, webp. Tilde (~) paths are accepted.
-                    At least one image must be provided.
+                    - Must contain at least 1 image.
+                    - Must not exceed 18 images.
+                    - Must be files on the local machine — URLs are not supported.
+                    - Supports jpg, jpeg, png, webp. Tilde (~) paths are accepted.
         tags        (list[str], optional): Hashtags to append, with or without leading '#'.
 
     Output (JSON object):
         { "success": true }
-        { "success": false, "error": str }
+        { "success": false, "errors": [str, ...] }   – validation failures
+        { "success": false, "error": str }            – runtime failure
     """
     logger.info("Tool: post_note title='%s'", title)
     browser, context = await get_persistent_context()
