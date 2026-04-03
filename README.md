@@ -1,5 +1,10 @@
 # rednote-mcp (Python)
 
+[![Python](https://img.shields.io/badge/Python-3.10+-blue?style=flat-square&logo=python)](https://www.python.org/)
+[![MCP](https://img.shields.io/badge/MCP-compatible-brightgreen?style=flat-square)](https://modelcontextprotocol.io/)
+[![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](./LICENSE)
+[![中文文档](https://img.shields.io/badge/文档-中文版-red?style=flat-square)](./README_CN.md)
+
 A Python [Model Context Protocol](https://modelcontextprotocol.io/) server for RedNote (小红书 / XiaoHongShu) — search, browse, and **post notes** via browser automation with [Playwright](https://playwright.dev/python/). Works with Claude, Cursor, or any MCP-compatible client.
 
 ## Tools
@@ -8,15 +13,15 @@ A Python [Model Context Protocol](https://modelcontextprotocol.io/) server for R
 |------|-------------|
 | `login` | Authenticate via QR code scan. Use `force=True` to reset the session. |
 | `set_browser_mode` | Toggle headless/headed browser. Use headed if tools return empty results. |
-| `search_notes` | Search notes by keyword. Returns title, author, tags, URL, likes, comments, `note_id`, and `xsec_token`. |
-| `get_note_details` | Fetch full note body and top-level comments using `note_id` + `xsec_token`. Returns `author_id` and `author_xsec_token` for chaining into `get_user_profile`. |
-| `get_user_profile` | Fetch a user's public profile — followers, following, likes, and recent posts. Pass `author_xsec_token` from `get_note_details` for an authenticated request. |
-| `get_community_trending` | Fetch trending notes from the explore feed. Returns `note_id` and `xsec_token` per item. |
-| `post_note` | **Post a picture-and-text note** to the creator platform. Requires 1–18 images, title ≤ 20 chars, content ≤ 1000 chars. |
+| `search_notes` | Search notes by keyword. Returns results with `note_id` and `xsec_token`. |
+| `get_note_details` | Fetch full note body and top-level comments using `note_id` + `xsec_token`. |
+| `get_user_profile` | Fetch a user's public profile. Pass `author_xsec_token` from `get_note_details`. |
+| `get_community_trending` | Fetch trending notes from the explore feed. |
+| `post_note` | Post a picture-and-text note. Requires 1–18 images, title ≤ 20 chars, content ≤ 1000 chars. |
 
 ## Token flow
 
-Tools chain together using `note_id` + `xsec_token` — XiaoHongShu's request signing system. Providing the token builds a properly authenticated URL (`xsec_source=pc_feed` / `pc_note`) that avoids access errors.
+Tools chain together using `note_id` + `xsec_token` — XiaoHongShu's request signing system.
 
 ```
 search_notes / get_community_trending
@@ -64,30 +69,25 @@ claude mcp list
 ### 3. Debug
 
 ```bash
-# Activate the virtual environment
 source .venv/bin/activate
-
-# Launch the MCP dev inspector
 mcp dev src/rednote_mcp/server.py
 ```
 
 ## First-time login
 
-Ask the agent to log in to RedNote. It opens a real Chrome window with a QR code — scan it with the RedNote app. Cookies are persisted to `~/.mcp/rednote/cookies.json` and reused automatically for all future calls.
+Ask the agent to log in to RedNote. It opens a real Chrome window with a QR code — scan it with the RedNote app. Cookies are persisted to `~/.mcp/rednote/cookies.json` and reused automatically.
 
 ## Anti-bot detection
 
-The following mitigations are built in:
-
 - **`playwright-stealth`** — patches `navigator.webdriver` and other JS fingerprint leaks
 - **Realistic browser fingerprint** — Chrome 145 user-agent, viewport 1440×900, locale `zh-CN`, timezone `Asia/Shanghai`
-- **Persistent browser session** — one browser instance reused across all tool calls (opening a fresh browser per call is a bot signal)
-- **Human mouse behaviour** — cursor moves to element with random ±5px jitter before each click
-- **Human typing** — characters typed one by one with 30–90ms random delays and occasional thinking pauses
+- **Persistent browser session** — one browser instance reused across all tool calls
+- **Human mouse behaviour** — cursor moves with random ±5px jitter before each click
+- **Human typing** — per-keystroke random delays with occasional thinking pauses
 - **Random delays** — randomised sleep between every major action
-- **Incremental scrolling** — page scrolled by random amounts (300–700px) with pauses between steps
+- **Incremental scrolling** — random scroll amounts with pauses between steps
 
-If tools return empty results (bot detection triggered): call `set_browser_mode(headless=False)`, then `login(force=True)`, scan the QR code, and retry.
+If tools return empty results: call `set_browser_mode(headless=False)`, then `login(force=True)`, scan the QR code, and retry.
 
 ## Project structure
 
