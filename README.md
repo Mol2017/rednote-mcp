@@ -48,6 +48,47 @@ The `login` tool opens a real Chrome window. Scan the QR code with the XiaoHongS
 
 ## MCP client configuration
 
+### Claude Code (CLI)
+
+Claude Code uses `claude mcp add` to register servers. Run this once from any directory:
+
+```bash
+claude mcp add rednote /path/to/rednote-mcp-python/.venv/bin/rednote-mcp
+```
+
+Replace `/path/to/rednote-mcp-python` with the actual clone path. Verify it is connected:
+
+```bash
+claude mcp list
+# rednote: /path/to/rednote-mcp-python/.venv/bin/rednote-mcp - ✓ Connected
+```
+
+The server is now available in every Claude Code session. To approve tools without being prompted each time, add them to `.claude/settings.local.json` in your project:
+
+```json
+{
+  "permissions": {
+    "allow": [
+      "mcp__rednote__search_notes",
+      "mcp__rednote__get_note_details",
+      "mcp__rednote__get_user_profile",
+      "mcp__rednote__get_community_trending",
+      "mcp__rednote__post_note",
+      "mcp__rednote__login",
+      "mcp__rednote__set_browser_mode"
+    ]
+  }
+}
+```
+
+Example usage inside a Claude Code session:
+
+```
+search for "AI工具" on rednote
+get note details from <url>
+post a note with image /tmp/photo.jpg and text "Hello RedNote"
+```
+
 ### Claude Desktop / Cursor
 
 Add to your `mcp_settings.json` (or equivalent):
