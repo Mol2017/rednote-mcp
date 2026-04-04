@@ -106,7 +106,7 @@ src/rednote_mcp/
 
 ## 使用示例
 
-<video src="demo.mp4" controls width="100%"></video>
+<video src="https://github.com/user-attachments/assets/c66da98e-7eab-4a25-9745-9fa04c0ee2a4" controls width="100%"></video>
 
 ## 许可证
 
