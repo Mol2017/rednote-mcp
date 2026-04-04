@@ -45,7 +45,7 @@ get_user_profile(author_id, author_xsec_token)
 ```bash
 # 1. Clone and enter the directory
 git clone https://github.com/Mol2017/rednote-mcp.git
-cd rednote-mcp-python
+cd rednote-mcp
 
 # 2. Create a virtual environment and install dependencies
 uv venv && source .venv/bin/activate
@@ -103,6 +103,10 @@ src/rednote_mcp/
 └── utils/
     └── logger.py          # Rotating file logger
 ```
+
+## Usage Example
+
+<video src="demo.mp4" controls width="100%"></video>
 
 ## License
 

@@ -104,6 +104,10 @@ src/rednote_mcp/
     └── logger.py          # 滚动日志
 ```
 
+## 使用示例
+
+<video src="demo.mp4" controls width="100%"></video>
+
 ## 许可证
 
 MIT
