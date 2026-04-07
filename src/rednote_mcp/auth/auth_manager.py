@@ -33,6 +33,15 @@ _CONTEXT_OPTIONS = {
     "viewport": {"width": 1440, "height": 900},
     "locale": "zh-CN",
     "timezone_id": "Asia/Shanghai",
+    "extra_http_headers": {
+        "Accept": (
+            "text/html,application/xhtml+xml,application/xml;q=0.9,"
+            "image/avif,image/webp,image/apng,*/*;q=0.8,"
+            "application/signed-exchange;v=b3;q=0.7"
+        ),
+        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+        "Referer": "https://www.xiaohongshu.com/",
+    },
 }
 
 
@@ -155,19 +164,3 @@ async def login(timeout_seconds: int = 60, force: bool = False) -> bool:
     return False
 
 
-async def get_authenticated_context(playwright_instance, headless: bool | None = None):
-    """
-    Return a BrowserContext with cookies loaded, or raise if not authenticated.
-    headless defaults to the global _headless flag (controlled via set_browser_headless).
-    """
-    cookies = load_cookies()
-    if not cookies:
-        raise RuntimeError(
-            "Not authenticated. Please run the login tool first."
-        )
-    effective_headless = _headless if headless is None else headless
-    browser: Browser = await playwright_instance.chromium.launch(headless=effective_headless)
-    context: BrowserContext = await browser.new_context()
-    await _stealth.apply_stealth_async(context)
-    await context.add_cookies(cookies)
-    return browser, context

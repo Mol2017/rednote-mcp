@@ -9,6 +9,20 @@ logger = get_logger(__name__)
 
 COOKIE_PATH = Path.home() / ".mcp" / "rednote" / "cookies.json"
 
+# Cookie names that XiaoHongShu uses for bot fingerprinting.
+# Removing them before injection reduces detection risk.
+# Learned from xhs-downloader's cookie sanitization approach.
+_BOT_FINGERPRINT_COOKIES = {"webId"}
+
+
+def _sanitize_cookies(cookies: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Remove cookies known to trigger bot detection."""
+    cleaned = [c for c in cookies if c.get("name") not in _BOT_FINGERPRINT_COOKIES]
+    removed = len(cookies) - len(cleaned)
+    if removed:
+        logger.info("Sanitized %d bot-fingerprint cookies", removed)
+    return cleaned
+
 
 def save_cookies(cookies: list[dict[str, Any]]) -> None:
     COOKIE_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -24,7 +38,7 @@ def load_cookies() -> list[dict[str, Any]] | None:
         with open(COOKIE_PATH, "r", encoding="utf-8") as f:
             cookies = json.load(f)
         logger.info("Loaded %d cookies from %s", len(cookies), COOKIE_PATH)
-        return cookies
+        return _sanitize_cookies(cookies)
     except Exception as e:
         logger.warning("Failed to load cookies: %s", e)
         return None

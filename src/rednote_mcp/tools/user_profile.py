@@ -1,17 +1,16 @@
 from __future__ import annotations
 
-import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, asdict, field
 
 from playwright.async_api import BrowserContext, Page
 
 from rednote_mcp.tools.note_detail import _parse_count
+from rednote_mcp.tools.rednote_tools import _AUTHOR_ID_RE
 from rednote_mcp.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
 XHS_USER_URL = "https://www.xiaohongshu.com/user/profile/{user_id}"
-_USER_ID_RE = re.compile(r"user/profile/([^/?#]+)")
 
 
 def _build_profile_url(user_id: str, xsec_token: str = "") -> str:
@@ -29,12 +28,7 @@ class RecentPost:
     likes: int = 0
 
     def to_dict(self) -> dict:
-        return {
-            "title": self.title,
-            "url": self.url,
-            "cover_img": self.cover_img,
-            "likes": self.likes,
-        }
+        return asdict(self)
 
 
 @dataclass
@@ -49,16 +43,7 @@ class UserProfile:
     profile_url: str = ""
 
     def to_dict(self) -> dict:
-        return {
-            "user_id": self.user_id,
-            "username": self.username,
-            "bio": self.bio,
-            "followers": self.followers,
-            "following": self.following,
-            "total_likes": self.total_likes,
-            "recent_posts": [p.to_dict() for p in self.recent_posts],
-            "profile_url": self.profile_url,
-        }
+        return asdict(self)
 
 
 async def get_user_profile(
@@ -92,7 +77,7 @@ async def get_user_profile(
             return ""
 
         # Extract user_id from final URL (after redirects)
-        m = _USER_ID_RE.search(page.url)
+        m = _AUTHOR_ID_RE.search(page.url)
         profile.user_id = m.group(1) if m else user_id
 
         profile.username = await text(

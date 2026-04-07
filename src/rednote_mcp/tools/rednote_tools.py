@@ -4,7 +4,7 @@ import os
 import asyncio
 import re
 import random
-from dataclasses import dataclass, field
+from dataclasses import dataclass, asdict, field
 from urllib.parse import quote
 
 from playwright.async_api import Page, BrowserContext
@@ -15,6 +15,7 @@ from rednote_mcp.tools.note_detail import (
     extract_note_detail,
     extract_top_level_comments,
     _parse_count,
+    _random_delay,
 )
 from rednote_mcp.utils.logger import get_logger
 
@@ -66,9 +67,6 @@ def _extract_url(text: str) -> str | None:
     return url
 
 
-async def _random_delay(lo: float = 1.0, hi: float = 3.0) -> None:
-    await asyncio.sleep(random.uniform(lo, hi))
-
 
 async def _human_click(page: Page, element) -> None:
     """Move mouse to element with slight jitter before clicking."""
@@ -117,18 +115,7 @@ class NoteSummary:
     xsec_token: str = ""
 
     def to_dict(self) -> dict:
-        return {
-            "title": self.title,
-            "author": self.author,
-            "content": self.content,
-            "tags": self.tags,
-            "url": self.url,
-            "likes": self.likes,
-            "collects": self.collects,
-            "comments": self.comments,
-            "note_id": self.note_id,
-            "xsec_token": self.xsec_token,
-        }
+        return asdict(self)
 
 
 async def search_notes(
@@ -143,13 +130,51 @@ async def search_notes(
         await page.wait_for_selector(".feeds-container", timeout=15_000)
         await _random_delay()
 
-        # Phase 1: scroll and collect unique URLs — gather extra as buffer for ads
+        # Phase 1: collect note URLs — prefer __INITIAL_STATE__ (single JS eval,
+        # zero DOM queries), fall back to DOM scraping.
         buffer = limit * 2
         seen_urls: set[str] = set()
-        # Store (full_url, note_id, xsec_token) tuples
-        collected: list[tuple[str, str, str]] = []
-        no_new_rounds = 0
+        collected: list[tuple[str, str, str]] = []  # (full_url, note_id, xsec_token)
 
+        # Try __INITIAL_STATE__ first — avoids DOM queries entirely
+        try:
+            js_notes = await page.evaluate("""
+                () => {
+                    try {
+                        const state = window.__INITIAL_STATE__;
+                        if (!state) return null;
+                        const items = state.search?.notes
+                            || state.search?.feeds
+                            || (state.noteDetailMap && Object.values(state.noteDetailMap));
+                        if (!items) return null;
+                        const results = [];
+                        for (const item of (Array.isArray(items) ? items : Object.values(items))) {
+                            const note = item?.note || item;
+                            const noteId = note?.noteId || note?.id;
+                            const xsecToken = item?.xsecToken || note?.xsecToken || '';
+                            if (noteId) {
+                                results.push({noteId, xsecToken});
+                            }
+                        }
+                        return results.length > 0 ? results : null;
+                    } catch(e) { return null; }
+                }
+            """)
+            if js_notes:
+                for item in js_notes:
+                    nid = item.get("noteId", "")
+                    token = item.get("xsecToken", "")
+                    if nid:
+                        full_url = f"https://www.xiaohongshu.com/explore/{nid}"
+                        if full_url not in seen_urls:
+                            seen_urls.add(full_url)
+                            collected.append((full_url, nid, token))
+                logger.info("Extracted %d note URLs from __INITIAL_STATE__", len(collected))
+        except Exception:
+            pass
+
+        # Fall back to DOM scraping if __INITIAL_STATE__ didn't yield enough
+        no_new_rounds = 0
         while len(collected) < buffer and no_new_rounds < 3:
             items = await page.query_selector_all(".feeds-container .note-item")
             new_this_round = 0
@@ -179,7 +204,7 @@ async def search_notes(
 
             if len(collected) < buffer:
                 await _scroll_down(page, steps=4)
-                await _random_delay(1.0, 2.0)
+                await _random_delay()
 
         await page.close()
         page = None  # prevent double-close in finally
@@ -249,23 +274,44 @@ async def get_note_details(
 
         base = await extract_note_detail(page, page.url)
 
-        # Extract author_id and author_xsec_token from the author profile link
+        # Extract author_id — prefer __INITIAL_STATE__ (already evaluated),
+        # fall back to DOM link parsing
         author_id = ""
         author_xsec_token = ""
         try:
-            for sel in (".author-container a", ".author-wrapper a"):
-                el = await page.query_selector(sel)
-                if el:
-                    href = await el.get_attribute("href")
-                    m = _AUTHOR_ID_RE.search(href or "")
-                    if m:
-                        author_id = m.group(1)
-                        tk_m = _XSEC_TOKEN_RE.search(href or "")
-                        if tk_m:
-                            author_xsec_token = tk_m.group(1)
-                        break
+            js_author = await page.evaluate("""
+                () => {
+                    try {
+                        const state = window.__INITIAL_STATE__;
+                        if (!state) return null;
+                        const map = state.noteDetailMap || state.note?.noteDetailMap;
+                        if (!map) return null;
+                        const key = Object.keys(map)[Object.keys(map).length - 1];
+                        const userId = map[key]?.note?.user?.userId;
+                        return userId || null;
+                    } catch(e) { return null; }
+                }
+            """)
+            if js_author:
+                author_id = js_author
         except Exception:
             pass
+
+        if not author_id:
+            try:
+                for sel in (".author-container a", ".author-wrapper a"):
+                    el = await page.query_selector(sel)
+                    if el:
+                        href = await el.get_attribute("href")
+                        m = _AUTHOR_ID_RE.search(href or "")
+                        if m:
+                            author_id = m.group(1)
+                            tk_m = _XSEC_TOKEN_RE.search(href or "")
+                            if tk_m:
+                                author_xsec_token = tk_m.group(1)
+                            break
+            except Exception:
+                pass
 
         top_comments = await extract_top_level_comments(page, limit=top_comments_limit)
 
@@ -318,7 +364,7 @@ async def post_note(
     creator_page: Page | None = None
     try:
         await page.goto("https://www.xiaohongshu.com/explore", wait_until="domcontentloaded")
-        await _random_delay(1.5, 2.5)
+        await _random_delay()
 
         new_page_future: asyncio.Future = asyncio.get_event_loop().create_future()
         context.once("page", lambda p: new_page_future.set_result(p) if not new_page_future.done() else None)
@@ -335,7 +381,7 @@ async def post_note(
 
         await creator_page.wait_for_load_state("domcontentloaded")
         await creator_page.set_viewport_size({"width": 1440, "height": 900})
-        await _random_delay(2, 3)
+        await _random_delay()
 
         # Step 2: click 上传图文 tab (the image+text tab, not the default video tab)
         # There are multiple elements with this text; use JS to click the first visible one
@@ -358,7 +404,7 @@ async def post_note(
         }''')
         if not clicked:
             return {"success": False, "error": "Could not find 上传图文 tab"}
-        await _random_delay(1, 2)
+        await _random_delay()
 
         # Step 3: upload images via file input
         try:
@@ -377,7 +423,7 @@ async def post_note(
             )
         except Exception as e:
             return {"success": False, "error": f"Image upload did not complete within 30s — the format may be unsupported (accepted: jpg, jpeg, png, webp). Paths: {image_paths}. Error: {e}"}
-        await _random_delay(2, 3)
+        await _random_delay()
 
         # Step 4: fill title
         try:
@@ -410,7 +456,7 @@ async def post_note(
         except Exception as e:
             return {"success": False, "error": f"Could not fill content field — content provided: {repr(content[:80])}. Error: {e}"}
 
-        await _random_delay(1, 2)
+        await _random_delay()
 
         # Step 6: click publish (standalone "发布" button, not "发布笔记")
         # Try up to 3 times; after each click, verify the button is gone
@@ -440,7 +486,7 @@ async def post_note(
             if not btn_clicked:
                 return {"success": False, "error": "Could not find publish button"}
 
-            await _random_delay(2, 3)
+            await _random_delay()
 
             # Check if the publish button is still visible — if gone, we succeeded
             still_visible = await creator_page.evaluate('''() => {

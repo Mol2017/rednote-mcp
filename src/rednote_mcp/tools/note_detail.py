@@ -1,7 +1,9 @@
 import asyncio
 import random
 import re
-from dataclasses import dataclass, field
+from math import log
+from random import lognormvariate
+from dataclasses import dataclass, asdict, field
 
 from playwright.async_api import Page
 
@@ -27,8 +29,10 @@ def _parse_count(text: str) -> int:
         return 0
 
 
-async def _random_delay(lo: float = 0.5, hi: float = 1.5) -> None:
-    await asyncio.sleep(random.uniform(lo, hi))
+async def _random_delay(avg: float = 6.0, sigma: float = 0.6) -> None:
+    """Lognormally-distributed delay matching xhs-downloader's timing."""
+    mu = log(avg) - (sigma ** 2 / 2)
+    await asyncio.sleep(max(0.5, lognormvariate(mu, sigma)))
 
 
 async def _el_text(el, selector: str) -> str:
@@ -58,18 +62,7 @@ class NoteDetail:
     comments: int = 0
 
     def to_dict(self) -> dict:
-        return {
-            "title": self.title,
-            "content": self.content,
-            "tags": self.tags,
-            "imgs": self.imgs,
-            "videos": self.videos,
-            "url": self.url,
-            "author": self.author,
-            "likes": self.likes,
-            "collects": self.collects,
-            "comments": self.comments,
-        }
+        return asdict(self)
 
 
 @dataclass
@@ -79,11 +72,7 @@ class TopLevelComment:
     likes: int = 0
 
     def to_dict(self) -> dict:
-        return {
-            "author": self.author,
-            "content": self.content,
-            "likes": self.likes,
-        }
+        return asdict(self)
 
 
 @dataclass
@@ -104,26 +93,77 @@ class NoteWithComments:
     top_level_comments: list[TopLevelComment] = field(default_factory=list)
 
     def to_dict(self) -> dict:
-        return {
-            "title": self.title,
-            "content": self.content,
-            "tags": self.tags,
-            "imgs": self.imgs,
-            "videos": self.videos,
-            "url": self.url,
-            "author": self.author,
-            "author_id": self.author_id,
-            "author_xsec_token": self.author_xsec_token,
-            "likes": self.likes,
-            "collects": self.collects,
-            "comments_count": self.comments_count,
-            "top_level_comments": [c.to_dict() for c in self.top_level_comments],
+        return asdict(self)
+
+
+# ---------------------------------------------------------------------------
+# Note body extraction — prefers window.__INITIAL_STATE__ (single JS eval,
+# fewer DOM queries, much less detectable) with DOM fallback.
+# Approach ported from xhs-downloader's Converter.
+# ---------------------------------------------------------------------------
+
+_EXTRACT_INITIAL_STATE_JS = """
+() => {
+    try {
+        const state = window.__INITIAL_STATE__;
+        if (!state) return null;
+        const map = state.noteDetailMap || state.note?.noteDetailMap;
+        if (!map) return null;
+        const key = Object.keys(map)[Object.keys(map).length - 1];
+        const entry = map[key];
+        const note = entry?.note;
+        if (!note) return null;
+
+        // Images
+        const imgs = [];
+        if (note.imageList) {
+            for (const img of note.imageList) {
+                const url = img.urlDefault || img.url;
+                if (url) imgs.push(url.startsWith('http') ? url : 'https:' + url);
+            }
         }
 
+        // Videos
+        const videos = [];
+        const streams = note.video?.media?.stream;
+        if (streams) {
+            for (const codec of ['h264', 'H264', 'h265', 'H265']) {
+                const list = streams[codec];
+                if (list && list.length > 0 && list[0].masterUrl) {
+                    videos.push(list[0].masterUrl);
+                    break;
+                }
+            }
+        }
 
-# ---------------------------------------------------------------------------
-# Note body extraction (unchanged from original)
-# ---------------------------------------------------------------------------
+        // Tags
+        const tags = [];
+        if (note.tagList) {
+            for (const t of note.tagList) {
+                if (t.name) tags.push('#' + t.name);
+            }
+        }
+
+        return {
+            title: note.title || '',
+            desc: note.desc || '',
+            tags: tags,
+            imgs: imgs,
+            videos: videos,
+            type: note.type || '',
+            author: note.user?.nickname || note.user?.nickName || '',
+            authorId: note.user?.userId || '',
+            likedCount: note.interactInfo?.likedCount || 0,
+            collectedCount: note.interactInfo?.collectedCount || 0,
+            commentCount: note.interactInfo?.commentCount || 0,
+            shareCount: note.interactInfo?.shareCount || 0,
+        };
+    } catch(e) {
+        return null;
+    }
+}
+"""
+
 
 async def extract_note_detail(page: Page, url: str) -> NoteDetail:
     detail = NoteDetail(url=url)
@@ -133,7 +173,28 @@ async def extract_note_detail(page: Page, url: str) -> NoteDetail:
     except Exception:
         logger.warning("Timed out waiting for note container at %s", url)
 
-    # Media container differs between image notes and video notes
+    # ---- Primary path: extract everything from __INITIAL_STATE__ ----
+    try:
+        state = await page.evaluate(_EXTRACT_INITIAL_STATE_JS)
+    except Exception:
+        state = None
+
+    if state:
+        detail.title = state.get("title", "")
+        detail.content = state.get("desc", "")
+        detail.tags = state.get("tags", [])
+        detail.imgs = state.get("imgs", [])
+        detail.videos = state.get("videos", [])
+        detail.author = state.get("author", "")
+        detail.likes = state.get("likedCount", 0)
+        detail.collects = state.get("collectedCount", 0)
+        detail.comments = state.get("commentCount", 0)
+        logger.info("Extracted note detail from __INITIAL_STATE__")
+        return detail
+
+    # ---- Fallback: DOM scraping (more detectable, but works if state is missing) ----
+    logger.info("__INITIAL_STATE__ unavailable, falling back to DOM scraping")
+
     for media_sel in (".media-container", ".video-container", "xg-player", ".note-video", "video"):
         try:
             await page.wait_for_selector(media_sel, timeout=3_000)
@@ -176,7 +237,6 @@ async def extract_note_detail(page: Page, url: str) -> NoteDetail:
     detail.collects = _parse_count(await text(".interact-container .collect-wrapper .count"))
     detail.comments = _parse_count(await text(".interact-container .chat-wrapper .count"))
 
-    # Images — include both media-container and note-slider (image carousels)
     for img in await page.query_selector_all(
         ".media-container img, .note-slider img, .swiper-slide img"
     ):
@@ -187,16 +247,7 @@ async def extract_note_detail(page: Page, url: str) -> NoteDetail:
         except Exception:
             pass
 
-    # Videos — XiaoHongShu uses a JS player that sets blob: URLs at runtime.
-    # The real stream URL lives in window.__INITIAL_STATE__ and og:video meta.
-    # Priority order:
-    #   1. window.__INITIAL_STATE__ h264 masterUrl (most reliable, highest quality)
-    #   2. <meta name="og:video"> content attribute
-    #   3. <video> element src/data-src/<source> (fallback, usually blob:)
-    # Poster thumbnail is always captured as a fallback image.
-    seen_video_urls: set[str] = set()
-
-    # Extract from window.__INITIAL_STATE__ JS object
+    # Video fallback from __INITIAL_STATE__ (already tried above, but try again for video-only)
     try:
         js_video_url = await page.evaluate("""
             () => {
@@ -209,14 +260,9 @@ async def extract_note_detail(page: Page, url: str) -> NoteDetail:
                         const note = map[key];
                         const streams = note?.note?.video?.media?.stream;
                         if (streams) {
-                            const h264 = streams.h264 || streams.H264;
-                            if (h264 && h264.length > 0 && h264[0].masterUrl) {
-                                return h264[0].masterUrl;
-                            }
-                            // try h265 as fallback
-                            const h265 = streams.h265 || streams.H265;
-                            if (h265 && h265.length > 0 && h265[0].masterUrl) {
-                                return h265[0].masterUrl;
+                            for (const codec of ['h264', 'H264', 'h265', 'H265']) {
+                                const list = streams[codec];
+                                if (list && list.length > 0 && list[0].masterUrl) return list[0].masterUrl;
                             }
                         }
                     }
@@ -224,9 +270,8 @@ async def extract_note_detail(page: Page, url: str) -> NoteDetail:
                 return null;
             }
         """)
-        if js_video_url and js_video_url not in seen_video_urls:
+        if js_video_url:
             detail.videos.append(js_video_url)
-            seen_video_urls.add(js_video_url)
     except Exception:
         pass
 
