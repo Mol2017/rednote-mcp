@@ -18,18 +18,18 @@
 | `get_user_profile` | 获取用户公开主页。可传入 `get_note_details` 返回的 `author_xsec_token`。 |
 | `post_note` | 发布图文笔记。需 1–18 张图片，标题 ≤ 20 字，正文 ≤ 1000 字。 |
 
-## Token 传递流程
+## 工作流
 
-各工具通过 `note_id` + `xsec_token`（小红书请求签名机制）串联使用：
+端到端内容创作管线：
 
 ```
-search_notes
-  → 每条结果包含 note_id、xsec_token
+search_notes(keyword)
       ↓
-get_note_details(note_id, xsec_token)
-  → 返回 author_id、author_xsec_token
+get_note_details() + get_user_profile()
       ↓
-get_user_profile(author_id, author_xsec_token)
+LLM 生成发布内容
+      ↓
+post_note(title, content, image_paths)
 ```
 
 ## 环境要求

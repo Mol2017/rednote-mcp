@@ -18,18 +18,18 @@ A Python [Model Context Protocol](https://modelcontextprotocol.io/) server for R
 | `get_user_profile` | Fetch a user's public profile. Pass `author_xsec_token` from `get_note_details`. |
 | `post_note` | Post a picture-and-text note. Requires 1–18 images, title ≤ 20 chars, content ≤ 1000 chars. |
 
-## Token flow
+## Workflow
 
-Tools chain together using `note_id` + `xsec_token` — XiaoHongShu's request signing system.
+End-to-end content creation pipeline:
 
 ```
-search_notes
-  → note_id, xsec_token per result
+search_notes(keyword)
       ↓
-get_note_details(note_id, xsec_token)
-  → author_id, author_xsec_token
+get_note_details() + get_user_profile()
       ↓
-get_user_profile(author_id, author_xsec_token)
+LLM generates post content
+      ↓
+post_note(title, content, image_paths)
 ```
 
 ## Requirements
